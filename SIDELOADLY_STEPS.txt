@@ -11,19 +11,23 @@ MATERIALS
       a) Sign up at github.com (free personal account).
       b) Click "+ New repository" — name it anything, keep it Public
          (private repos get free Actions minutes too, up to 2,000/mo).
-      c) On your Windows box, in c:\Users\federal\Analysis\FragMod:
-            git init
-            git add .
-            git commit -m "frag unlock"
-            git branch -M main
-            git remote add origin https://github.com/<you>/<repo>.git
+      Repo already set up: https://github.com/Ashie0000/ligamental
+      Local folder c:\Users\federal\Analysis\FragMod is already
+      initialised and committed, with origin pointing at the repo.
+
+      c) Push from Windows (PowerShell or Git Bash):
+            cd c:\Users\federal\Analysis\FragMod
             git push -u origin main
-      d) On GitHub, click the "Actions" tab. The "build" workflow runs
-         automatically on every push. First run finishes in ~2 minutes.
-      e) Click the run → scroll down to "Artifacts" → download
-         FragUnlock-dylib.zip. Unzip to get FragUnlock.dylib.
-      f) Re-trigger builds any time: Actions tab → "build" → "Run
-         workflow" button. Every edit you push rebuilds automatically.
+         GitHub will prompt once for credentials — use a Personal
+         Access Token (not your password). Generate one at:
+            https://github.com/settings/tokens/new
+         Scopes needed: repo + workflow.
+      d) After push: open https://github.com/Ashie0000/ligamental/actions
+         The "build" workflow starts automatically. First run ~2 min.
+      e) Open the run → scroll to Artifacts → download
+         FragUnlock-dylib.zip → unzip → FragUnlock.dylib.
+      f) Re-trigger builds any time: Actions → "build" → "Run workflow".
+         Any edit + push rebuilds automatically.
 
    Prefer local Mac build? ./build_mac.sh with Xcode CLT installed
    drops FragUnlock.dylib in FragMod/dist/.
