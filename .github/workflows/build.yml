@@ -36,29 +36,71 @@ jobs:
           sudo chown -R "$USER":"$USER" "$THEOS"
           git clone --recursive https://github.com/theos/theos.git "$THEOS"
 
-      - name: resolve + install darwin-targeting clang toolchain
+      - name: install darwin-targeting clang toolchain
         run: |
           set -eux
-          mkdir -p "$THEOS/toolchain/linux/iphone"
+          TC="$THEOS/toolchain/linux/iphone"
+          mkdir -p "$TC"
+          rm -rf /tmp/tcx
+          mkdir -p /tmp/tcx
 
-          # Pull latest release asset matching an ubuntu linux toolchain.
-          META="$(curl -fsSL https://api.github.com/repos/kabiroberai/swift-toolchain-linux/releases/latest)"
-          echo "$META" | jq '.tag_name, (.assets[].name)'
+          # Try known-good sources in order until one unpacks a usable clang.
+          URLS=(
+            "https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.1.0/swift-5.9-ubuntu22.04.tar.xz"
+            "https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.0.0/swift-5.8-ubuntu22.04.tar.xz"
+            "https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v1.0.1/swift-5.5-ubuntu20.04.tar.xz"
+            "https://github.com/sbingner/llvm-project/releases/download/v10.0.0-1/linux-ios-arm64e-clang-toolchain.tar.lzma"
+          )
 
-          URL="$(echo "$META" | jq -r '.assets[] | select(.name|test("ubuntu.*(tar\\.xz|tar\\.gz)$")) | .browser_download_url' | head -1)"
-          if [ -z "$URL" ]; then
-            URL="https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.1.0/swift-5.9-ubuntu22.04.tar.xz"
+          CLANG=""
+          for URL in "${URLS[@]}"; do
+            echo "::group::try $URL"
+            rm -rf /tmp/tcx && mkdir -p /tmp/tcx
+            if ! curl -fL --retry 3 -o /tmp/tc.bin "$URL"; then
+              echo "fetch failed"; echo "::endgroup::"; continue
+            fi
+            case "$URL" in
+              *.tar.xz)   tar -xf  /tmp/tc.bin -C /tmp/tcx || true ;;
+              *.tar.gz)   tar -xzf /tmp/tc.bin -C /tmp/tcx || true ;;
+              *.tar.lzma) (cd /tmp/tcx && lzcat /tmp/tc.bin | tar -xf -) || true ;;
+            esac
+            CLANG="$(find /tmp/tcx -type f -name 'clang++' -perm -u+x 2>/dev/null | head -1)"
+            if [ -z "$CLANG" ]; then
+              CLANG_C="$(find /tmp/tcx -type f -name 'clang' -perm -u+x 2>/dev/null | head -1)"
+              [ -n "$CLANG_C" ] && CLANG="$CLANG_C"
+            fi
+            echo "::endgroup::"
+            if [ -n "$CLANG" ]; then
+              echo "picked toolchain: $URL"; break
+            fi
+          done
+
+          if [ -z "$CLANG" ]; then
+            echo "FATAL: no usable clang in any candidate tarball" >&2
+            find /tmp/tcx -maxdepth 4 | head -50 >&2
+            exit 1
           fi
-          echo "toolchain url: $URL"
 
-          curl -fL --retry 3 -o /tmp/tc.tar "$URL"
-          case "$URL" in
-            *.tar.xz) tar -xf /tmp/tc.tar -C "$THEOS/toolchain/linux/iphone" --strip-components=1 ;;
-            *.tar.gz) tar -xzf /tmp/tc.tar -C "$THEOS/toolchain/linux/iphone" --strip-components=1 ;;
-          esac
+          # Move the extracted root (the dir containing bin/ or usr/bin/) to $TC.
+          SRC_ROOT="$(dirname "$(dirname "$CLANG")")"
+          echo "src root: $SRC_ROOT"
+          rsync -a "$SRC_ROOT/" "$TC/"
 
-          ls "$THEOS/toolchain/linux/iphone/bin" | head -20
-          "$THEOS/toolchain/linux/iphone/bin/clang" --version || true
+          # Normalize: clang needs to be at $TC/bin/clang[++] because Makefile
+          # and theos convention expect that. If it only lives in usr/bin,
+          # symlink everything over.
+          if [ ! -x "$TC/bin/clang" ] && [ -x "$TC/usr/bin/clang" ]; then
+            mkdir -p "$TC/bin"
+            for f in "$TC/usr/bin/"*; do
+              ln -sf "../usr/bin/$(basename "$f")" "$TC/bin/$(basename "$f")"
+            done
+          fi
+
+          echo "---- bin ----"
+          ls -l "$TC/bin" | head -30
+          echo "---- clang version ----"
+          "$TC/bin/clang" --version
+          "$TC/bin/clang++" --version || true
 
       - name: install iOS SDK
         run: |
