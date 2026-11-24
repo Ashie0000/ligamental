@@ -1,0 +1,59 @@
+name: build
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**.mm'
+      - '**.h'
+      - 'Makefile'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+jobs:
+  dylib:
+    name: build FragUnlock.dylib (arm64 iOS)
+    runs-on: macos-14
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: show xcode / sdk
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk iphoneos -f clang++
+
+      - name: build
+        run: |
+          make clean || true
+          make -j"$(sysctl -n hw.ncpu)"
+
+      - name: verify arm64 mach-o
+        run: |
+          file FragUnlock.dylib
+          lipo -info FragUnlock.dylib
+          otool -L FragUnlock.dylib | head -40
+          otool -l FragUnlock.dylib | grep -A2 LC_ID_DYLIB | head -10
+
+      - name: stage artifact
+        run: |
+          mkdir -p dist
+          cp FragUnlock.dylib dist/FragUnlock.dylib
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FragUnlock-dylib
+          path: dist/FragUnlock.dylib
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/FragUnlock.dylib

@@ -1,0 +1,78 @@
+FRAG UNLOCK — Sideloadly install (no jailbreak)
+================================================
+
+MATERIALS
+---------
+1. The original IPA you already have:
+   c:\Users\federal\Analysis\com.ohbibi.fps_v5.7.2_und3fined.ipa
+2. A compiled FragUnlock.dylib (arm64, iOS 14+).
+   No Mac? Use GitHub Actions — it runs the build on Apple's macOS
+   runners for free. One-time setup (10 minutes):
+      a) Sign up at github.com (free personal account).
+      b) Click "+ New repository" — name it anything, keep it Public
+         (private repos get free Actions minutes too, up to 2,000/mo).
+      c) On your Windows box, in c:\Users\federal\Analysis\FragMod:
+            git init
+            git add .
+            git commit -m "frag unlock"
+            git branch -M main
+            git remote add origin https://github.com/<you>/<repo>.git
+            git push -u origin main
+      d) On GitHub, click the "Actions" tab. The "build" workflow runs
+         automatically on every push. First run finishes in ~2 minutes.
+      e) Click the run → scroll down to "Artifacts" → download
+         FragUnlock-dylib.zip. Unzip to get FragUnlock.dylib.
+      f) Re-trigger builds any time: Actions tab → "build" → "Run
+         workflow" button. Every edit you push rebuilds automatically.
+
+   Prefer local Mac build? ./build_mac.sh with Xcode CLT installed
+   drops FragUnlock.dylib in FragMod/dist/.
+3. Sideloadly for Windows: https://sideloadly.io
+4. iTunes (not Microsoft Store version — the standalone installer, so
+   Sideloadly can talk to the device driver).
+5. An Apple ID.
+      Free account — 7-day resigning window.
+      Paid developer — 1-year signing.
+
+STEPS
+-----
+1. Plug the iPhone/iPad in with a USB cable, trust the computer.
+2. Launch Sideloadly.
+3. Drag com.ohbibi.fps_v5.7.2_und3fined.ipa onto Sideloadly's main window.
+4. Click the gear icon (Advanced Options).
+5. Under "Inject files/tweaks", click the + button and add:
+      FragUnlock.dylib
+6. Close Advanced Options.
+7. In the "Apple ID" field, type your Apple ID.
+8. Click Start. First-time only: Sideloadly asks for the app-specific
+   password for the Apple ID; follow the on-screen link to appleid.apple.com
+   and generate one, paste it back.
+9. Watch the progress bar: Sideloadly resigns the IPA, inserts
+   LC_LOAD_DYLIB for FragUnlock.dylib into the main FRAG binary, repacks,
+   and pushes to the device.
+10. On the device: Settings → General → VPN & Device Management →
+    trust the developer profile matching your Apple ID.
+11. Launch FRAG. A pink "FRAG UNLOCK" chip appears in the top-left after
+    ~2 seconds. Drag it anywhere. Tap it to open the mod menu.
+
+USING THE MENU
+--------------
+- Auto-grant any purchase: ON by default. Any time the game calls
+  [SKPaymentQueue addPayment:] (any in-game Buy button), the dylib
+  synthesizes a .purchased SKPaymentTransaction and delivers it to
+  Unity's native IAP observer. Unity thinks Apple approved the sale.
+- Search: type "diamonds", "vip", "speoffer" etc. to filter.
+- Grant Picked: sends a batched grant for every row you ticked.
+- Grant ALL: fans out all 90 known SKUs at once.
+- X: hide the menu. Chip stays. Tap chip to reopen.
+
+CAVEATS
+-------
+- Server-side ledger: Ohbibi's backend may revalidate on next session.
+  Local items appear immediately. If the game reconciles with its server
+  and finds no matching Apple receipt, some items may be stripped on the
+  next login. In-game currency (diamonds) usually sticks; subscriptions
+  and battle passes are more likely to be checked.
+- Free Apple account resign expires after 7 days — rerun Sideloadly.
+- iOS 17+ may ask to re-enable developer mode after each install.
+- No jailbreak needed.

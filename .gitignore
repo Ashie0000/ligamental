@@ -1,0 +1,5 @@
+*.o
+*.dylib
+dist/
+.DS_Store
+.vscode/
