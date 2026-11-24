@@ -14,7 +14,6 @@ jobs:
 
     env:
       THEOS: /opt/theos
-      SDK_NAME: iPhoneOS16.5.sdk
 
     steps:
       - name: checkout
@@ -22,52 +21,63 @@ jobs:
 
       - name: apt deps
         run: |
+          set -eux
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential fakeroot rsync curl wget perl zip unzip git \
-            libtinfo5 libz-dev python3 ca-certificates xz-utils
+            libz-dev python3 ca-certificates xz-utils jq
+          # libtinfo5 lives only in some ubuntu codenames — try, don't fail
+          sudo apt-get install -y libtinfo5 || true
 
-      - name: fetch theos
+      - name: clone theos
         run: |
+          set -eux
           sudo mkdir -p "$THEOS"
-          sudo chown "$USER:$USER" "$THEOS"
+          sudo chown -R "$USER":"$USER" "$THEOS"
           git clone --recursive https://github.com/theos/theos.git "$THEOS"
 
-      - name: fetch darwin-targeting clang toolchain (linux)
+      - name: resolve + install darwin-targeting clang toolchain
         run: |
+          set -eux
           mkdir -p "$THEOS/toolchain/linux/iphone"
-          for url in \
-            https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.1.0/swift-5.9-ubuntu22.04.tar.xz \
-            https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.0.0/swift-5.8-ubuntu22.04.tar.xz \
-            https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v1.0.1/swift-5.5-ubuntu20.04.tar.xz; do
-            echo "trying $url"
-            if curl -fL --retry 3 -o /tmp/tc.tar.xz "$url"; then
-              echo "got $url"
-              break
-            fi
-          done
-          tar -xf /tmp/tc.tar.xz -C "$THEOS/toolchain/linux/iphone" --strip-components=1
-          ls "$THEOS/toolchain/linux/iphone/bin" | head -30
 
-      - name: fetch iOS SDK
+          # Pull latest release asset matching an ubuntu linux toolchain.
+          META="$(curl -fsSL https://api.github.com/repos/kabiroberai/swift-toolchain-linux/releases/latest)"
+          echo "$META" | jq '.tag_name, (.assets[].name)'
+
+          URL="$(echo "$META" | jq -r '.assets[] | select(.name|test("ubuntu.*(tar\\.xz|tar\\.gz)$")) | .browser_download_url' | head -1)"
+          if [ -z "$URL" ]; then
+            URL="https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.1.0/swift-5.9-ubuntu22.04.tar.xz"
+          fi
+          echo "toolchain url: $URL"
+
+          curl -fL --retry 3 -o /tmp/tc.tar "$URL"
+          case "$URL" in
+            *.tar.xz) tar -xf /tmp/tc.tar -C "$THEOS/toolchain/linux/iphone" --strip-components=1 ;;
+            *.tar.gz) tar -xzf /tmp/tc.tar -C "$THEOS/toolchain/linux/iphone" --strip-components=1 ;;
+          esac
+
+          ls "$THEOS/toolchain/linux/iphone/bin" | head -20
+          "$THEOS/toolchain/linux/iphone/bin/clang" --version || true
+
+      - name: install iOS SDK
         run: |
+          set -eux
           mkdir -p "$THEOS/sdks"
           git clone --depth=1 https://github.com/theos/sdks.git /tmp/sdks
-          if [ -d "/tmp/sdks/$SDK_NAME" ]; then
-            cp -R "/tmp/sdks/$SDK_NAME" "$THEOS/sdks/"
-          else
-            # fall back to whatever iPhoneOS SDK is in the repo
-            PICK="$(ls /tmp/sdks | grep -E '^iPhoneOS[0-9.]+\.sdk$' | sort -V | tail -1)"
-            echo "using fallback SDK: $PICK"
-            cp -R "/tmp/sdks/$PICK" "$THEOS/sdks/"
-            echo "SDK_NAME=$PICK" >> "$GITHUB_ENV"
-          fi
+          # Pick the newest iPhoneOS SDK present in the mirror.
+          PICK="$(ls /tmp/sdks | grep -E '^iPhoneOS[0-9.]+\.sdk$' | sort -V | tail -1)"
+          echo "picked SDK: $PICK"
+          cp -R "/tmp/sdks/$PICK" "$THEOS/sdks/"
+          echo "SDK_NAME=$PICK" >> "$GITHUB_ENV"
 
       - name: build dylib
         run: |
+          set -eux
           export PATH="$THEOS/toolchain/linux/iphone/bin:$PATH"
+          make -f Makefile info
           make -f Makefile clean || true
-          make -f Makefile -j"$(nproc)"
+          make -f Makefile -j"$(nproc)" V=1
           ls -l FragUnlock.dylib
           file FragUnlock.dylib || true
 
