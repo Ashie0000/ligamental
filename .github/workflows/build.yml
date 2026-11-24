@@ -9,30 +9,67 @@ on:
 
 jobs:
   dylib:
-    name: build FragUnlock.dylib (arm64 iOS)
-    runs-on: macos-13
+    name: build FragUnlock.dylib (arm64 iOS, linux theos)
+    runs-on: ubuntu-22.04
+
+    env:
+      THEOS: /opt/theos
+      SDK_NAME: iPhoneOS16.5.sdk
 
     steps:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: show xcode / sdk
+      - name: apt deps
         run: |
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-path
-          xcrun --sdk iphoneos -f clang++
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential fakeroot rsync curl wget perl zip unzip git \
+            libtinfo5 libz-dev python3 ca-certificates xz-utils
 
-      - name: build
+      - name: fetch theos
         run: |
-          make clean || true
-          make -j"$(sysctl -n hw.ncpu)"
+          sudo mkdir -p "$THEOS"
+          sudo chown "$USER:$USER" "$THEOS"
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
 
-      - name: verify arm64 mach-o
+      - name: fetch darwin-targeting clang toolchain (linux)
         run: |
-          file FragUnlock.dylib
-          lipo -info FragUnlock.dylib
-          otool -L FragUnlock.dylib | head -40
-          otool -l FragUnlock.dylib | grep -A2 LC_ID_DYLIB | head -10
+          mkdir -p "$THEOS/toolchain/linux/iphone"
+          for url in \
+            https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.1.0/swift-5.9-ubuntu22.04.tar.xz \
+            https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.0.0/swift-5.8-ubuntu22.04.tar.xz \
+            https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v1.0.1/swift-5.5-ubuntu20.04.tar.xz; do
+            echo "trying $url"
+            if curl -fL --retry 3 -o /tmp/tc.tar.xz "$url"; then
+              echo "got $url"
+              break
+            fi
+          done
+          tar -xf /tmp/tc.tar.xz -C "$THEOS/toolchain/linux/iphone" --strip-components=1
+          ls "$THEOS/toolchain/linux/iphone/bin" | head -30
+
+      - name: fetch iOS SDK
+        run: |
+          mkdir -p "$THEOS/sdks"
+          git clone --depth=1 https://github.com/theos/sdks.git /tmp/sdks
+          if [ -d "/tmp/sdks/$SDK_NAME" ]; then
+            cp -R "/tmp/sdks/$SDK_NAME" "$THEOS/sdks/"
+          else
+            # fall back to whatever iPhoneOS SDK is in the repo
+            PICK="$(ls /tmp/sdks | grep -E '^iPhoneOS[0-9.]+\.sdk$' | sort -V | tail -1)"
+            echo "using fallback SDK: $PICK"
+            cp -R "/tmp/sdks/$PICK" "$THEOS/sdks/"
+            echo "SDK_NAME=$PICK" >> "$GITHUB_ENV"
+          fi
+
+      - name: build dylib
+        run: |
+          export PATH="$THEOS/toolchain/linux/iphone/bin:$PATH"
+          make -f Makefile clean || true
+          make -f Makefile -j"$(nproc)"
+          ls -l FragUnlock.dylib
+          file FragUnlock.dylib || true
 
       - name: stage artifact
         run: |
