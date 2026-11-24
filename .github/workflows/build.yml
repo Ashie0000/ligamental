@@ -37,23 +37,42 @@ jobs:
           git clone --recursive https://github.com/theos/theos.git "$THEOS"
 
       - name: install darwin-targeting clang toolchain
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eux
           TC="$THEOS/toolchain/linux/iphone"
           mkdir -p "$TC"
-          rm -rf /tmp/tcx
-          mkdir -p /tmp/tcx
 
-          # Try known-good sources in order until one unpacks a usable clang.
-          URLS=(
-            "https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.1.0/swift-5.9-ubuntu22.04.tar.xz"
-            "https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.0.0/swift-5.8-ubuntu22.04.tar.xz"
-            "https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v1.0.1/swift-5.5-ubuntu20.04.tar.xz"
-            "https://github.com/sbingner/llvm-project/releases/download/v10.0.0-1/linux-ios-arm64e-clang-toolchain.tar.lzma"
+          # Query GitHub's release API for whatever's actually live right now.
+          # Preference order: kabiroberai swift-toolchain (newest clang/swift
+          # darwin cross build), then sbingner llvm-project (older but proven).
+          REPOS=(
+            "kabiroberai/swift-toolchain-linux"
+            "sbingner/llvm-project"
           )
 
+          # Collect every candidate asset URL from the latest release of each.
+          CANDIDATES=()
+          for REPO in "${REPOS[@]}"; do
+            echo "::group::query $REPO"
+            META="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+                    -H "Authorization: Bearer $GH_TOKEN" \
+                    "https://api.github.com/repos/$REPO/releases/latest" || echo '{}')"
+            echo "$META" | jq -r '.tag_name, (.assets[]?.name)'
+            while IFS= read -r U; do
+              [ -n "$U" ] && CANDIDATES+=("$U")
+            done < <(echo "$META" | jq -r \
+              '.assets[]?.browser_download_url
+               | select(test("\\.(tar\\.xz|tar\\.gz|tar\\.lzma|tar\\.bz2|tar)$"))')
+            echo "::endgroup::"
+          done
+          echo "candidates: ${#CANDIDATES[@]}"
+          printf '  - %s\n' "${CANDIDATES[@]}"
+
+          # Try each candidate: download, extract, probe for clang.
           CLANG=""
-          for URL in "${URLS[@]}"; do
+          for URL in "${CANDIDATES[@]}"; do
             echo "::group::try $URL"
             rm -rf /tmp/tcx && mkdir -p /tmp/tcx
             if ! curl -fL --retry 3 -o /tmp/tc.bin "$URL"; then
@@ -62,45 +81,45 @@ jobs:
             case "$URL" in
               *.tar.xz)   tar -xf  /tmp/tc.bin -C /tmp/tcx || true ;;
               *.tar.gz)   tar -xzf /tmp/tc.bin -C /tmp/tcx || true ;;
+              *.tar.bz2)  tar -xjf /tmp/tc.bin -C /tmp/tcx || true ;;
               *.tar.lzma) (cd /tmp/tcx && lzcat /tmp/tc.bin | tar -xf -) || true ;;
+              *.tar)      tar -xf  /tmp/tc.bin -C /tmp/tcx || true ;;
             esac
-            CLANG="$(find /tmp/tcx -type f -name 'clang++' -perm -u+x 2>/dev/null | head -1)"
-            if [ -z "$CLANG" ]; then
-              CLANG_C="$(find /tmp/tcx -type f -name 'clang' -perm -u+x 2>/dev/null | head -1)"
-              [ -n "$CLANG_C" ] && CLANG="$CLANG_C"
-            fi
+            CLANG="$(find /tmp/tcx -type f \( -name 'clang++' -o -name 'clang' \) \
+                     -perm -u+x 2>/dev/null | head -1)"
             echo "::endgroup::"
-            if [ -n "$CLANG" ]; then
-              echo "picked toolchain: $URL"; break
-            fi
+            if [ -n "$CLANG" ]; then echo "picked: $URL"; break; fi
           done
 
           if [ -z "$CLANG" ]; then
-            echo "FATAL: no usable clang in any candidate tarball" >&2
-            find /tmp/tcx -maxdepth 4 | head -50 >&2
+            echo "FATAL: no candidate tarball contained clang" >&2
+            echo "last extract tree:" >&2
+            find /tmp/tcx -maxdepth 4 2>/dev/null | head -60 >&2
             exit 1
           fi
 
-          # Move the extracted root (the dir containing bin/ or usr/bin/) to $TC.
+          # Install: extracted root is the dir two levels above the clang bin.
           SRC_ROOT="$(dirname "$(dirname "$CLANG")")"
           echo "src root: $SRC_ROOT"
           rsync -a "$SRC_ROOT/" "$TC/"
 
-          # Normalize: clang needs to be at $TC/bin/clang[++] because Makefile
-          # and theos convention expect that. If it only lives in usr/bin,
-          # symlink everything over.
+          # Normalize: ensure clang[++] is reachable at $TC/bin/.
           if [ ! -x "$TC/bin/clang" ] && [ -x "$TC/usr/bin/clang" ]; then
             mkdir -p "$TC/bin"
             for f in "$TC/usr/bin/"*; do
               ln -sf "../usr/bin/$(basename "$f")" "$TC/bin/$(basename "$f")"
             done
           fi
+          # Some sbingner-style builds ship clang but not clang++; alias it.
+          if [ -x "$TC/bin/clang" ] && [ ! -e "$TC/bin/clang++" ]; then
+            ln -sf clang "$TC/bin/clang++"
+          fi
 
           echo "---- bin ----"
-          ls -l "$TC/bin" | head -30
+          ls -l "$TC/bin" | head -40
           echo "---- clang version ----"
-          "$TC/bin/clang" --version
-          "$TC/bin/clang++" --version || true
+          "$TC/bin/clang"   --version
+          "$TC/bin/clang++" --version
 
       - name: install iOS SDK
         run: |
