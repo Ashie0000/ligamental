@@ -10,7 +10,7 @@ on:
 jobs:
   dylib:
     name: build FragUnlock.dylib (arm64 iOS)
-    runs-on: macos-14
+    runs-on: macos-13
 
     steps:
       - name: checkout
